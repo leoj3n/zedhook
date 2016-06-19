@@ -49,26 +49,34 @@ then
   exit 133
 fi
 
-opt_message=$(cat </dev/stdin)
+opt_message="$(cat </dev/stdin)"
 
 cat << EOF >> /var/log/zedhook.log
 |-------------------------- $(date -u '+%Y-%m-%d %H:%M:%S') UTC --------------------------|
-Subject: $opt_subject
+Subject: ${opt_subject}
 
-$opt_message
+${opt_message}
 |-----------------------------------------------------------------------------|
 EOF
 
+# encode newlines as HTML entities
 json_message=''
-for line in $opt_message; do
-  json_message="$json_message$line\\n"
+for line in ${opt_message}; do
+  json_message="${json_message}${line}&#13;"
 done
 
+# sanitize quotes
+json_message="$(echo "${json_message}" | sed 's/"/\\\"/g')"
+json_message="$(echo "${json_message}" | sed "s/'/'\"'\"'/g")"
+json_subject="$(echo "${opt_subject}" | sed 's/"/\\\"/g')"
+json_subject="$(echo "${json_subject}" | sed "s/'/'\"'\"'/g")"
+
+# webhook
 eval $(cat <<EOF
 wget -O- --header=Content-Type:application/json --post-data='{
-  "subject": "$opt_subject",
-  "message": "$json_message"
-}' "$@"
+  "subject": "${json_subject}",
+  "message": "${json_message}"
+}' $@
 EOF
 )
 

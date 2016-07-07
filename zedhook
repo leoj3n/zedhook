@@ -54,9 +54,11 @@ ${opt_message}
 EOF
 } || echo "Warning: log file <${opt_file}> is not writeable."
 
-# Field separator is newline.
-IFS="
+# Field separator is newline, tab, empty newline.
+IFS="	
+
 "
+
 # Encode newlines as HTML entities.
 json_message=''
 for line in ${opt_message}; do

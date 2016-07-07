@@ -44,7 +44,7 @@ shift "$(($OPTIND - 1))"
 } || opt_message="$(cat </dev/stdin)"
 
 # Log to file.
-[ -w "${opt_file}" ] && {
+touch "${opt_file}" && {
 cat << EOF >> "${opt_file}"
 |-------------------------- $(date -u '+%Y-%m-%d %H:%M:%S') UTC --------------------------|
 Subject: ${opt_subject}
@@ -85,5 +85,6 @@ else
   exit 127
 fi
 
+echo
 exit 0
 

@@ -1,84 +1,89 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
-# Set the field separator to a newline.
-IFS="
-"
+# Program name.
+prog_name="${0##*/}"
 
-# Set default program options.
-opt_subject=''
+# Defaults.
 opt_message=''
+opt_subject="${prog_name} alert"
+opt_file="/var/log/${prog_name}.log"
 
-print_usage ()
+# Usage.
+usage ()
 {
-  echo "Usage: $0 [-s subject] ...
+  echo "Usage: ${prog_name} [-s subject] ...
   -s, --subject      Specify subject on command line (only the first argument after the -s flag is used as a subject; be careful to quote subjects containing spaces).
+  -f, --file         Change the location of the ${prog_name} log file (default location is <${opt_file}>).
   -h, --help         Print this usage message.
 "
 }
+[ $# -eq 0 ] && usage && exit 2
 
-GETOPT=$(getopt \
-  --longoptions=subject: \
-  --longoptions=help \
-  --options=s:h \
-  -- "$@" ) \
-  || exit 128
-
-eval set -- "$GETOPT"
-
-while [ "$#" -gt '0' ]
+# Options.
+while getopts ':h(help):s:(subject):f:(file)' arg
 do
-  case "$1" in
-    (-s|--subject)
-      opt_subject="$2"
-      shift 2
+  case "${arg}" in
+    s)
+      opt_subject="${OPTARG}"
       ;;
-    (-h|--help)
-      print_usage
+    f)
+      opt_file="${OPTARG}"
+      ;;
+    h | *)
+      usage
       exit 0
-      ;;
-    (--)
-      shift 1
-      break
       ;;
   esac
 done
+shift "$(($OPTIND - 1))"
 
-if [ "$#" -eq '0' ]
-then
-  echo "Error: The argument list is empty."
-  exit 133
-fi
+# Input.
+[ -t 0 ] && {
+  echo 'Error: STDIN is missing.'
+  exit 2
+} || opt_message="$(cat </dev/stdin)"
 
-opt_message="$(cat </dev/stdin)"
-
-cat << EOF >> /var/log/zedhook.log
+# Log to file.
+[ -w "${opt_file}" ] && {
+cat << EOF >> "${opt_file}"
 |-------------------------- $(date -u '+%Y-%m-%d %H:%M:%S') UTC --------------------------|
 Subject: ${opt_subject}
 
 ${opt_message}
 |-----------------------------------------------------------------------------|
 EOF
+} || echo "Warning: log file <${opt_file}> is not writeable."
 
-# encode newlines as HTML entities
+# Field separator is newline.
+IFS="
+"
+# Encode newlines as HTML entities.
 json_message=''
 for line in ${opt_message}; do
   json_message="${json_message}${line}&#13;"
 done
 
-# sanitize quotes
+# Sanitize.
 json_message="$(echo "${json_message}" | sed 's/"/\\\"/g')"
 json_message="$(echo "${json_message}" | sed "s/'/'\"'\"'/g")"
 json_subject="$(echo "${opt_subject}" | sed 's/"/\\\"/g')"
 json_subject="$(echo "${json_subject}" | sed "s/'/'\"'\"'/g")"
 
-# webhook
-eval $(cat <<EOF
-wget -O- --header=Content-Type:application/json --post-data='{
-  "subject": "${json_subject}",
-  "message": "${json_message}"
-}' $@
-EOF
-)
+# Arguments.
+json_header='Content-Type: application/json'
+json_data="$(printf '{"subject": "%s", "message": "%s"}' "${json_subject}" "${json_message}")"
+
+# Post.
+if command -v curl >/dev/null 2>&1
+then
+  eval "$(printf "curl -H '%s' -X POST -d '%s' --insecure %s" "${json_header}" "${json_data}" "$@")"
+elif command -v wget >/dev/null 2>&1
+then
+  eval "$(printf "wget -O- --header='%s' --post-data='%s' --no-check-certificate %s" "${json_header}" "${json_data}" "$@")"
+else
+  echo 'Error: Could not find curl or wget.'
+  exit 127
+fi
 
 exit 0
 

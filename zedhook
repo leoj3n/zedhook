@@ -9,18 +9,17 @@ opt_subject="${prog_name} alert"
 opt_file="/var/log/${prog_name}.log"
 
 # Usage.
-usage ()
-{
-  echo "Usage: ${prog_name} [-s subject] ...
-  -s, --subject      Specify subject on command line (only the first argument after the -s flag is used as a subject; be careful to quote subjects containing spaces).
-  -f, --file         Change the location of the ${prog_name} log file (default location is <${opt_file}>).
-  -h, --help         Print this usage message.
-"
+usage() {
+cat <<EOF
+Usage: ${prog_name} [-s subject] ...
+  -s    Specify subject on command line (only the first argument after the -s flag is used as a subject; be careful to quote subjects containing spaces).
+  -f    Change the location of the ${prog_name} log file (default location is <${opt_file}>).
+  -h    Print this usage message.
+EOF
 }
-[ $# -eq 0 ] && usage && exit 2
 
 # Options.
-while getopts ':h(help):s:(subject):f:(file)' arg
+while getopts ':hs:f:' arg
 do
   case "${arg}" in
     s)
@@ -37,9 +36,11 @@ do
 done
 shift $((OPTIND - 1))
 
+[ $# -eq 1 ] || usage && exit 2
+
 # Input.
 [ -t 0 ] && {
-  echo 'Error: STDIN is missing.'
+  echo 'Error: STDIN must be a pipe or file.' 1>&2
   exit 2
 } || opt_message="$(cat </dev/stdin)"
 
@@ -54,38 +55,26 @@ ${opt_message}
 EOF
 } || echo "Warning: log file <${opt_file}> is not writeable."
 
-# Field separator is newline, tab, empty newline.
-IFS="	
-
-"
-
-# Encode newlines as HTML entities.
-json_message=''
-for line in ${opt_message}; do
-  json_message="${json_message}${line}&#13;"
-done
-
-# Sanitize.
-json_message="$(echo "${json_message}" | sed 's/"/\\\"/g')"
-json_message="$(echo "${json_message}" | sed "s/'/'\"'\"'/g")"
-json_subject="$(echo "${opt_subject}" | sed 's/"/\\\"/g')"
-json_subject="$(echo "${json_subject}" | sed "s/'/'\"'\"'/g")"
+# Sanitizer.
+json() { printf '%s' "$1" | sed 's/\\/\\\\/g;s/\//\\\//g;s/\t/\\t/g;s/"/\\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g'; }
 
 # Arguments.
 json_header='Content-Type: application/json'
-json_data="$(printf '{"subject": "%s", "message": "%s"}' "${json_subject}" "${json_message}")"
+json_data="$(
+  printf '{"%s":"%s","%s":"%s"}' \
+    'subject' "$(json "${opt_subject}")" \
+    'message' "$(json "${opt_message}")"
+)"
 
 # Post.
-if command -v curl >/dev/null 2>&1
-then
-  eval "$(printf "curl -H '%s' -X POST -d '%s' --insecure %s" "${json_header}" "${json_data}" "$@")"
-elif command -v wget >/dev/null 2>&1
-then
-  eval "$(printf "wget -O- --header='%s' --post-data='%s' --no-check-certificate %s" "${json_header}" "${json_data}" "$@")"
-else
-  echo 'Error: Could not find curl or wget.'
+{
+  curl -H "${json_header}" -X POST -d "${json_data}" --insecure "$@" 2>/dev/null
+} || {
+  wget -O- --header="${json_header}" --post-data="${json_data}" --no-check-certificate "$@" 2>/dev/null
+} || {
+  echo 'Error: Could not find curl or wget.' 1>&2
   exit 127
-fi
+}
 
 echo
 exit 0
